@@ -138,6 +138,12 @@ chmod -R 777 "$DATA_DIR"
 DEFAULT_BINARY_URL="https://github.com/RiadDeveloper/BotCrafter-Setup/releases/latest/download/botcrafter-server-linux-amd64"
 BINARY_URL="${BOTCRAFTER_BINARY_URL:-$DEFAULT_BINARY_URL}"
 
+# Stop any existing service/process before replacing binary
+echo -e "${CYAN}[*] Stopping any existing BotCrafter service to release file locks...${NC}"
+systemctl stop botcrafter 2>/dev/null || true
+pkill -9 -f "botcrafter-server" 2>/dev/null || true
+sleep 1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Check if local compiled binary is already present

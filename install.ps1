@@ -97,19 +97,29 @@ if (-not (Test-Path $DataDir)) {
 }
 
 # 4. Download Standalone Compiled Binary (Zero Source Code Exposed)
+Write-Host "[*] Stopping any active BotCrafter processes to release file locks..." -ForegroundColor Cyan
+Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
+Stop-ScheduledTask -TaskName "BotCrafterServer" -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+
 Write-Host "[*] Acquiring compiled BotCrafter executable..." -ForegroundColor Blue
 $LocalBinary = "$PSScriptRoot\backend\dist\botcrafter-server.exe"
 
 if (Test-Path $LocalBinary) {
     Write-Host "[+] Installing local pre-compiled binary..." -ForegroundColor Green
+    Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
     Copy-Item -Path $LocalBinary -Destination $BinaryDest -Force
 } else {
     $DownloadUrl = if ($env:BOTCRAFTER_BINARY_URL) { $env:BOTCRAFTER_BINARY_URL } else { "https://github.com/RiadDeveloper/BotCrafter-Setup/releases/latest/download/botcrafter-server.exe" }
     Write-Host "[*] Downloading protected binary from: $DownloadUrl" -ForegroundColor Cyan
+    $TempBinary = "$InstallDir\botcrafter-server.tmp.exe"
     try {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $BinaryDest -UseBasicParsing
-        Write-Host "[+] Binary downloaded successfully!" -ForegroundColor Green
+        Invoke-WebRequest -Uri $DownloadUrl -OutFile $TempBinary -UseBasicParsing
+        Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+        Move-Item -Path $TempBinary -Destination $BinaryDest -Force
+        Write-Host "[+] Binary downloaded and installed successfully!" -ForegroundColor Green
     } catch {
         Write-Host "[!] Could not download from release URL ($($_.Exception.Message))." -ForegroundColor Yellow
         Write-Host "[*] Checking for local repository to compile on-the-fly..." -ForegroundColor Blue
@@ -123,9 +133,13 @@ if (Test-Path $LocalBinary) {
         Set-Location "$RepoPath\backend"
         python -m pip install -r requirements.txt pyinstaller
         python -m PyInstaller --clean --noconfirm botcrafter.spec
-        Copy-Item -Path "$RepoPath\backend\dist\botcrafter-server.exe" -Destination $BinaryDest -Force
+        
+        Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+        Move-Item -Path "$RepoPath\backend\dist\botcrafter-server.exe" -Destination $BinaryDest -Force
         
         # Purge source code after compilation to protect IP
+        Set-Location "$InstallDir"
         Remove-Item -Path $RepoPath -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "[+] Source code purged. Protected binary ready at $BinaryDest" -ForegroundColor Green
     }
