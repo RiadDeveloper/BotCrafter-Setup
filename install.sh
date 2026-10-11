@@ -245,6 +245,7 @@ cat <<'EOF' > "$CLI_CMD"
 #!/usr/bin/env bash
 CONFIG_FILE="/etc/botcrafter/botcrafter.env"
 BINARY_DEST="/usr/local/bin/botcrafter-server"
+SYSTEMD_FILE="/etc/systemd/system/botcrafter.service"
 
 case "$1" in
   start)
@@ -268,14 +269,81 @@ case "$1" in
     journalctl -u botcrafter -f -n 50
     ;;
   update)
-    echo "[*] Updating BotCrafter compiled binary..."
+    echo "=============================================================================="
+    echo "[*] Updating BotCrafter Engine to Latest Release (Zero Data Loss)..."
+    echo "=============================================================================="
     UPDATE_URL="https://github.com/RiadDeveloper/BotCrafter-Setup/releases/latest/download/botcrafter-server-linux-amd64"
-    if curl -fsSL -o "$BINARY_DEST" "$UPDATE_URL"; then
-      chmod +x "$BINARY_DEST"
-      systemctl restart botcrafter
-      echo "[✓] Updated binary and restarted successfully!"
+    TMP_DEST="/tmp/botcrafter-server-new"
+    echo "[*] Fetching latest binary release..."
+    if curl -fsSL -o "$TMP_DEST" "$UPDATE_URL"; then
+      chmod +x "$TMP_DEST"
+      systemctl stop botcrafter 2>/dev/null || true
+      mv -f "$TMP_DEST" "$BINARY_DEST"
+      systemctl start botcrafter
+      echo ""
+      echo "[✓] BotCrafter Engine successfully updated to latest version!"
+      echo "[✓] ZERO DATA LOSS: All bot instances, SQLite database, and configs preserved."
+      echo "[*] Background 24/7 service restarted."
     else
-      echo "[!] Failed to download binary update."
+      echo "[✗] Failed to download binary update from ${UPDATE_URL}."
+      rm -f "$TMP_DEST" 2>/dev/null || true
+    fi
+    ;;
+  set-ip)
+    NEW_IP="$2"
+    if [ -z "$NEW_IP" ]; then
+      read -p "Enter new Server Public IP or Domain: " NEW_IP
+    fi
+    if [ -n "$NEW_IP" ] && [ -f "$CONFIG_FILE" ]; then
+      sed -i "s|^SERVER_HOST_IP=.*|SERVER_HOST_IP=\"${NEW_IP}\"|g" "$CONFIG_FILE"
+      sed -i "s|^SERVER_DOMAIN=.*|SERVER_DOMAIN=\"${NEW_IP}\"|g" "$CONFIG_FILE"
+      systemctl restart botcrafter
+      source "$CONFIG_FILE"
+      echo ""
+      echo "[✓] Server IP / Domain successfully updated to: ${NEW_IP}"
+      echo "  🌐 Live Server URL: http://${NEW_IP}:${PORT}"
+      echo "  📚 API Docs:        http://${NEW_IP}:${PORT}/docs"
+    else
+      echo "[✗] Invalid IP/domain or configuration file missing."
+    fi
+    ;;
+  uninstall)
+    echo "=============================================================================="
+    echo "[!] WARNING: You are about to UNINSTALL BotCrafter from this system!"
+    echo "=============================================================================="
+    read -p "Are you sure you want to completely uninstall BotCrafter? [y/N]: " CONFIRM
+    if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+      echo "[*] Stopping BotCrafter service..."
+      systemctl stop botcrafter 2>/dev/null || true
+      systemctl disable botcrafter 2>/dev/null || true
+      rm -f "$SYSTEMD_FILE"
+      systemctl daemon-reload
+
+      if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+        if command -v ufw >/dev/null 2>&1 && [ -n "$PORT" ]; then
+          echo "[*] Removing firewall rule for port ${PORT}..."
+          ufw delete allow "${PORT}/tcp" >/dev/null 2>&1 || true
+        fi
+      fi
+
+      rm -f "$BINARY_DEST"
+
+      read -p "Do you also want to permanently delete all bot instance data in ${DATA_DIR:-/var/lib/botcrafter}? [y/N]: " DEL_DATA
+      if [[ "$DEL_DATA" =~ ^[Yy]$ ]]; then
+        rm -rf /var/lib/botcrafter
+        rm -rf /etc/botcrafter
+        echo "[✓] All bot instances and configurations completely removed."
+      else
+        rm -f "$CONFIG_FILE"
+        echo "[!] Binaries & service removed. Bot data preserved in /var/lib/botcrafter."
+      fi
+
+      rm -f "$CLI_CMD"
+      echo ""
+      echo "[✓] BotCrafter has been completely and permanently uninstalled!"
+    else
+      echo "[*] Uninstallation cancelled."
     fi
     ;;
   info)
@@ -294,12 +362,11 @@ case "$1" in
     ;;
   *)
     echo "BotCrafter CLI Manager"
-    echo "Usage: botcrafter {start|stop|restart|status|logs|update|info}"
+    echo "Usage: botcrafter {status|logs|restart|stop|start|info|update|set-ip|uninstall}"
     exit 1
     ;;
 esac
 EOF
-
 
 chmod +x "$CLI_CMD"
 
@@ -325,8 +392,11 @@ echo -e "  ➜ Check service status:   ${CYAN}botcrafter status${NC}"
 echo -e "  ➜ View live server logs:  ${CYAN}botcrafter logs${NC}"
 echo -e "  ➜ Restart backend engine: ${CYAN}botcrafter restart${NC}"
 echo -e "  ➜ Stop backend engine:    ${CYAN}botcrafter stop${NC}"
-echo -e "  ➜ Update to latest code:  ${CYAN}botcrafter update${NC}"
+echo -e "  ➜ Start backend engine:   ${CYAN}botcrafter start${NC}"
 echo -e "  ➜ View server info:       ${CYAN}botcrafter info${NC}"
+echo -e "  ➜ Update engine (No loss):${CYAN}botcrafter update${NC}"
+echo -e "  ➜ Change server IP:       ${CYAN}botcrafter set-ip <new_ip>${NC}"
+echo -e "  ➜ Uninstall BotCrafter:   ${CYAN}botcrafter uninstall${NC}"
 echo ""
 echo -e "${BLUE}==============================================================================${NC}"
 echo -e "${BOLD}${YELLOW}📌 Note:${NC} You can connect your Frontend (Vercel or Local) by setting:"

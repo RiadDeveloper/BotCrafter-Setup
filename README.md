@@ -54,12 +54,15 @@ After installation, manage your server from any terminal on the VPS:
 
 | Command | Action |
 |---|---|
-| `botcrafter status` | Check service health, process status, and uptime |
+| `botcrafter status` | Check service health, process status, memory, and uptime |
 | `botcrafter logs` | View live backend logs in real-time (Linux) |
 | `botcrafter restart` | Gracefully restart the backend engine |
 | `botcrafter stop` | Stop the backend engine |
 | `botcrafter start` | Start the backend engine |
 | `botcrafter info` | View server URL, port, storage, and admin email |
+| `botcrafter update` | Update engine to latest release (**Zero Data Loss** — all bots & DB preserved) |
+| `botcrafter set-ip <new_ip>` | Change server public IP / domain and apply changes immediately |
+| `botcrafter uninstall` | Permanently remove BotCrafter service, firewall rules, and files |
 
 ---
 

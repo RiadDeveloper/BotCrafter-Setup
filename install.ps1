@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # BotCrafter Backend Automated Windows VPS Installer & 24/7 Autostart Setup
 # Supports: Windows Server 2016/2019/2022, Windows 10/11 Pro
 # ==============================================================================
@@ -39,8 +39,8 @@ Write-Host ""
 Write-Host "-------------------- [ 1. Server Configuration ] --------------------" -ForegroundColor Yellow
 
 # Port
-$InputPort = Read-Host "➜ Enter Backend Port [Default: 8001]"
-$Port = if ([string]::IsNullOrWhiteSpace($InputPort)) { "8001" } else { $InputPort }
+$InputPort = Read-Host "➜ Enter Backend Port [Default: 8000]"
+$Port = if ([string]::IsNullOrWhiteSpace($InputPort)) { "8000" } else { $InputPort }
 
 # Host IP / Domain
 $InputHost = Read-Host "➜ Enter Public IP or Domain [Default: $DetectedIP]"
@@ -188,70 +188,278 @@ Start-ScheduledTask -TaskName $TaskName
 Write-Host "[+] Windows 24/7 Service started successfully!" -ForegroundColor Green
 
 # 8. Create Global CLI Helper: 'botcrafter'
+$CliPs1Path = "$InstallDir\cli.ps1"
+$LocalCli = "$InstallDir\botcrafter.cmd"
 $CliBat = "C:\Windows\System32\botcrafter.cmd"
-$CliContent = @"
-@echo off
-if "%1"=="" goto help
-if "%1"=="start" (
-    schtasks /run /tn "BotCrafterServer"
-    echo [*] Started BotCrafter service.
-    goto end
+
+$CliPs1Content = @'
+param(
+    [string]$Command = "help",
+    [string]$Arg1 = ""
 )
-if "%1"=="stop" (
-    taskkill /F /IM botcrafter-server.exe >nul 2>&1
-    echo [*] Stopped BotCrafter service.
-    goto end
-)
-if "%1"=="restart" (
-    taskkill /F /IM botcrafter-server.exe >nul 2>&1
-    schtasks /run /tn "BotCrafterServer"
-    echo [*] Restarted BotCrafter service.
-    goto end
-)
-if "%1"=="status" (
-    tasklist /FI "IMAGENAME eq botcrafter-server.exe"
-    schtasks /query /tn "BotCrafterServer"
-    goto end
-)
-if "%1"=="info" (
-    echo ==========================================
-    echo BotCrafter Windows Service Information
-    echo ==========================================
-    echo Server URL: http://${ServerHost}:${Port}
-    echo API Docs:   http://${ServerHost}:${Port}/docs
-    echo Storage:    $DataDir
-    echo Binary:     $BinaryDest
-    echo Config:     $ConfigFile
-    echo ==========================================
-    goto end
-)
-:help
-echo BotCrafter CLI Manager for Windows
-echo Usage: botcrafter [start ^| stop ^| restart ^| status ^| info]
-:end
-"@
+
+$InstallDir = "C:\botcrafter"
+$EnvFile = "$InstallDir\.env"
+$EnvFile2 = "$InstallDir\botcrafter.env"
+$Binary = "$InstallDir\botcrafter-server.exe"
+$TaskName = "BotCrafterServer"
+
+switch ($Command.ToLower()) {
+    "start" {
+        Write-Host "[*] Starting BotCrafter Windows Service..." -ForegroundColor Cyan
+        schtasks /run /tn $TaskName | Out-Null
+        Start-Sleep -Seconds 1
+        $proc = Get-Process -Name "botcrafter-server" -ErrorAction SilentlyContinue
+        if ($proc) {
+            Write-Host "[+] BotCrafter service started successfully (PID: $($proc.Id))!" -ForegroundColor Green
+        } else {
+            Write-Host "[!] Service triggered via Task Scheduler." -ForegroundColor Yellow
+        }
+    }
+    "stop" {
+        Write-Host "[*] Stopping BotCrafter Engine..." -ForegroundColor Cyan
+        Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
+        Write-Host "[+] BotCrafter service stopped." -ForegroundColor Green
+    }
+    "restart" {
+        Write-Host "[*] Restarting BotCrafter Engine..." -ForegroundColor Cyan
+        Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+        schtasks /run /tn $TaskName | Out-Null
+        Start-Sleep -Seconds 2
+        $proc = Get-Process -Name "botcrafter-server" -ErrorAction SilentlyContinue
+        if ($proc) {
+            Write-Host "[+] BotCrafter restarted successfully (PID: $($proc.Id))!" -ForegroundColor Green
+        } else {
+            Write-Host "[+] Restart signal sent." -ForegroundColor Green
+        }
+    }
+    "status" {
+        Write-Host "==========================================" -ForegroundColor Cyan
+        Write-Host "   BotCrafter Windows Service Status      " -ForegroundColor Cyan
+        Write-Host "==========================================" -ForegroundColor Cyan
+        $proc = Get-Process -Name "botcrafter-server" -ErrorAction SilentlyContinue
+        if ($proc) {
+            $mem = [math]::Round((($proc | Measure-Object -Property WorkingSet64 -Sum).Sum / 1MB), 2)
+            $pids = ($proc | ForEach-Object { $_.Id }) -join ", "
+            Write-Host "Process Status:   RUNNING" -ForegroundColor Green
+            Write-Host "Process ID:       $pids"
+            Write-Host "Memory Usage:     $mem MB"
+        } else {
+            Write-Host "Process Status:   STOPPED" -ForegroundColor Red
+        }
+        Write-Host ""
+        Write-Host "Scheduled Task Status:" -ForegroundColor Yellow
+        schtasks /query /tn $TaskName /fo LIST 2>$null | Select-String "TaskName|Status|Next Run Time|Last Run Time|Last Result"
+    }
+    "info" {
+        Write-Host "==========================================" -ForegroundColor Cyan
+        Write-Host "   BotCrafter Configuration Details       " -ForegroundColor Cyan
+        Write-Host "==========================================" -ForegroundColor Cyan
+        $targetEnv = if (Test-Path $EnvFile) { $EnvFile } else { $EnvFile2 }
+        if (Test-Path $targetEnv) {
+            $raw = Get-Content $targetEnv -Raw
+            $ip = "127.0.0.1"
+            $port = "8000"
+            $admin = "N/A"
+            $data = "$InstallDir\instances"
+            
+            $mIp = [regex]::Match($raw, 'SERVER_HOST_IP="?([^"\r\n]+)"?')
+            if ($mIp.Success) { $ip = $mIp.Groups[1].Value }
+            $mPort = [regex]::Match($raw, 'PORT=(\d+)')
+            if ($mPort.Success) { $port = $mPort.Groups[1].Value }
+            $mAdmin = [regex]::Match($raw, 'ADMIN_EMAIL="?([^"\r\n]+)"?')
+            if ($mAdmin.Success) { $admin = $mAdmin.Groups[1].Value }
+            $mData = [regex]::Match($raw, 'DATA_DIR="?([^"\r\n]+)"?')
+            if ($mData.Success) { $data = $mData.Groups[1].Value }
+
+            $proc = Get-Process -Name "botcrafter-server" -ErrorAction SilentlyContinue
+            $statusText = if ($proc) { "ONLINE (PID: $($proc.Id))" } else { "OFFLINE" }
+
+            Write-Host "Service Status:  $statusText" -ForegroundColor $(if ($proc) { "Green" } else { "Red" })
+            Write-Host "Live Server URL: http://${ip}:${port}" -ForegroundColor Cyan
+            Write-Host "API Docs:        http://${ip}:${port}/docs" -ForegroundColor Cyan
+            Write-Host "Storage Path:    $data" -ForegroundColor Yellow
+            Write-Host "Admin Email:     $admin" -ForegroundColor Yellow
+            Write-Host "Executable:      $Binary"
+            Write-Host "Config File:     $targetEnv"
+        } else {
+            Write-Host "[!] Configuration file not found at $EnvFile" -ForegroundColor Red
+        }
+        Write-Host "==========================================" -ForegroundColor Cyan
+    }
+    "update" {
+        Write-Host "==============================================================================" -ForegroundColor Green
+        Write-Host " [*] Updating BotCrafter Engine to Latest Release (Zero Data Loss)..." -ForegroundColor Green
+        Write-Host "==============================================================================" -ForegroundColor Green
+        
+        $url = "https://github.com/RiadDeveloper/BotCrafter-Setup/releases/latest/download/botcrafter-server.exe"
+        $tempDest = "$InstallDir\botcrafter-server.new.exe"
+        
+        Write-Host "[*] Downloading latest binary release from GitHub..." -ForegroundColor Cyan
+        try {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri $url -OutFile $tempDest -UseBasicParsing
+            
+            Write-Host "[*] Stopping current engine process..." -ForegroundColor Cyan
+            Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+            
+            Move-Item -Path $tempDest -Destination $Binary -Force
+            schtasks /run /tn $TaskName | Out-Null
+            Start-Sleep -Seconds 2
+            
+            Write-Host ""
+            Write-Host "[+] BotCrafter Engine successfully updated to latest version!" -ForegroundColor Green
+            Write-Host "[+] ZERO DATA LOSS: All bot instances, SQLite database, and configurations remain 100% intact!" -ForegroundColor Green
+            Write-Host "[*] Background Windows service restarted 24/7." -ForegroundColor Cyan
+        } catch {
+            Write-Host "[!] Update failed: $($_.Exception.Message)" -ForegroundColor Red
+            if (Test-Path $tempDest) { Remove-Item $tempDest -Force -ErrorAction SilentlyContinue }
+        }
+    }
+    "set-ip" {
+        $newIp = $Arg1
+        if ([string]::IsNullOrWhiteSpace($newIp)) {
+            $newIp = Read-Host "Enter new Server Public IP or Domain"
+        }
+        if ([string]::IsNullOrWhiteSpace($newIp)) {
+            Write-Host "[!] IP / Domain cannot be empty." -ForegroundColor Red
+            return
+        }
+        
+        $filesToUpdate = @($EnvFile, $EnvFile2)
+        $updated = $false
+        $port = "8000"
+        
+        foreach ($f in $filesToUpdate) {
+            if (Test-Path $f) {
+                $raw = Get-Content $f -Raw
+                $mPort = [regex]::Match($raw, 'PORT=(\d+)')
+                if ($mPort.Success) { $port = $mPort.Groups[1].Value }
+                
+                $quotedIp = '"{0}"' -f $newIp
+                $newContent = $raw -replace 'SERVER_HOST_IP="?[^"\r\n]*"?', "SERVER_HOST_IP=$quotedIp"
+                $newContent = $newContent -replace 'SERVER_DOMAIN="?[^"\r\n]*"?', "SERVER_DOMAIN=$quotedIp"
+                Set-Content -Path $f -Value $newContent -NoNewline
+                $updated = $true
+            }
+        }
+        
+        if ($updated) {
+            Write-Host "[*] Restarting BotCrafter to apply new network settings..." -ForegroundColor Cyan
+            Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+            schtasks /run /tn $TaskName | Out-Null
+            Start-Sleep -Seconds 2
+            
+            Write-Host ""
+            Write-Host "[+] Server IP / Domain successfully updated to: $newIp" -ForegroundColor Green
+            Write-Host "  Live Server URL: http://${newIp}:${port}" -ForegroundColor Cyan
+            Write-Host "  API Docs:        http://${newIp}:${port}/docs" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  Note: Update your Frontend NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WS_URL accordingly." -ForegroundColor Yellow
+        } else {
+            Write-Host "[!] Configuration files not found." -ForegroundColor Red
+        }
+    }
+    "uninstall" {
+        Write-Host "==============================================================================" -ForegroundColor Red
+        Write-Host " [!] WARNING: You are about to UNINSTALL BotCrafter from this system!" -ForegroundColor Red
+        Write-Host "==============================================================================" -ForegroundColor Red
+        $ans = Read-Host "Are you sure you want to completely uninstall BotCrafter? (y/N)"
+        if ($ans -notmatch "^[Yy]$") {
+            Write-Host "[*] Uninstallation cancelled." -ForegroundColor Yellow
+            return
+        }
+        
+        Write-Host "[*] Stopping running processes..." -ForegroundColor Cyan
+        Stop-Process -Name "botcrafter-server" -Force -ErrorAction SilentlyContinue
+        
+        Write-Host "[*] Removing 24/7 Scheduled Task..." -ForegroundColor Cyan
+        schtasks /delete /tn $TaskName /f 2>$null | Out-Null
+        
+        Write-Host "[*] Removing Windows Firewall Rules..." -ForegroundColor Cyan
+        Remove-NetFirewallRule -DisplayName "BotCrafter Backend Port*" -ErrorAction SilentlyContinue
+        
+        $delData = Read-Host "Do you also want to permanently delete all bot instance data in $InstallDir\instances? (y/N)"
+        if ($delData -match "^[Yy]$") {
+            Write-Host "[*] Removing entire directory: $InstallDir..." -ForegroundColor Cyan
+            Remove-Item -Path $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "[+] All bot instances, configs, and directory completely wiped." -ForegroundColor Green
+        } else {
+            Write-Host "[*] Removing binaries and service files only..." -ForegroundColor Cyan
+            Remove-Item -Path "$InstallDir\botcrafter-server.exe", "$InstallDir\run-botcrafter.cmd", "$InstallDir\cli.ps1", "$InstallDir\botcrafter.cmd" -Force -ErrorAction SilentlyContinue
+            Write-Host "[!] Engine removed. Bot data preserved in $InstallDir\instances." -ForegroundColor Yellow
+        }
+        
+        Remove-Item -Path "C:\Windows\System32\botcrafter.cmd" -Force -ErrorAction SilentlyContinue
+        $mPath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+        if ($mPath -like "*$InstallDir*") {
+            [Environment]::SetEnvironmentVariable("Path", ($mPath -replace ";?$([regex]::Escape($InstallDir))", ""), "Machine")
+        }
+        
+        Write-Host ""
+        Write-Host "[+] BotCrafter has been completely and permanently uninstalled!" -ForegroundColor Green
+    }
+    default {
+        Write-Host "BotCrafter Windows Management CLI" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "Usage: botcrafter [command]"
+        Write-Host ""
+        Write-Host "Commands:"
+        Write-Host "  status      Check service health and running processes"
+        Write-Host "  start       Start the background engine"
+        Write-Host "  stop        Stop the background engine"
+        Write-Host "  restart     Restart the background engine"
+        Write-Host "  update      Update engine to latest release without losing any bot data"
+        Write-Host "  set-ip      Change public IP / domain and apply changes immediately"
+        Write-Host "  info        Display current URLs, ports, and configuration details"
+        Write-Host "  uninstall   Completely remove service, firewall rules, and files"
+        Write-Host ""
+    }
+}
+'@
+
 try {
-    [System.IO.File]::WriteAllText($CliBat, $CliContent, [System.Text.Encoding]::ASCII)
+    [System.IO.File]::WriteAllText($CliPs1Path, $CliPs1Content, [System.Text.Encoding]::UTF8)
+    
+    $LocalCmdContent = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0cli.ps1`" %*"
+    [System.IO.File]::WriteAllText($LocalCli, $LocalCmdContent, [System.Text.Encoding]::ASCII)
+    
+    $Sys32CmdContent = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\cli.ps1`" %*"
+    [System.IO.File]::WriteAllText($CliBat, $Sys32CmdContent, [System.Text.Encoding]::ASCII)
 } catch {}
+
+try {
+    $MachinePath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
+    if ($MachinePath -notlike "*$InstallDir*") {
+        [Environment]::SetEnvironmentVariable("Path", "$MachinePath;$InstallDir", [EnvironmentVariableTarget]::Machine)
+    }
+} catch {}
+
 
 # 9. Final Output
 Start-Sleep -Seconds 3
 Write-Host ""
 Write-Host "==============================================================================" -ForegroundColor Green
-Write-Host "   🎉 CONGRATULATIONS! BOTCRAFTER IS INSTALLED ON WINDOWS & RUNNING 24/7! 🎉" -ForegroundColor Green
+Write-Host "   *** CONGRATULATIONS! BOTCRAFTER IS INSTALLED ON WINDOWS & RUNNING 24/7! ***" -ForegroundColor Green
 Write-Host "==============================================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  🌐 Live Server URL:       http://${ServerHost}:${Port}" -ForegroundColor Cyan
-Write-Host "  📚 Interactive API Docs:  http://${ServerHost}:${Port}/docs" -ForegroundColor Cyan
-Write-Host "  👤 Administrator Email:   $AdminEmail" -ForegroundColor Yellow
-Write-Host "  💾 Storage Path:          $DataDir" -ForegroundColor Yellow
-Write-Host "  🔄 Windows Autostart:     ENABLED (Starts automatically on VPS boot 24/7)" -ForegroundColor Green
+Write-Host "  Live Server URL:       http://${ServerHost}:${Port}" -ForegroundColor Cyan
+Write-Host "  Interactive API Docs:  http://${ServerHost}:${Port}/docs" -ForegroundColor Cyan
+Write-Host "  Administrator Email:   $AdminEmail" -ForegroundColor Yellow
+Write-Host "  Storage Path:          $DataDir" -ForegroundColor Yellow
+Write-Host "  Windows Autostart:     ENABLED (Starts automatically on VPS boot 24/7)" -ForegroundColor Green
 Write-Host ""
 Write-Host "-------------------- [ Management CLI Commands ] --------------------" -ForegroundColor Magenta
-Write-Host "  ➜ Check service status:   botcrafter status" -ForegroundColor Cyan
-Write-Host "  ➜ Restart backend:        botcrafter restart" -ForegroundColor Cyan
-Write-Host "  ➜ Stop backend:           botcrafter stop" -ForegroundColor Cyan
-Write-Host "  ➜ Start backend:          botcrafter start" -ForegroundColor Cyan
-Write-Host "  ➜ View server info:       botcrafter info" -ForegroundColor Cyan
+Write-Host "  -> Check service status:   botcrafter status" -ForegroundColor Cyan
+Write-Host "  -> Restart backend:        botcrafter restart" -ForegroundColor Cyan
+Write-Host "  -> Stop backend:           botcrafter stop" -ForegroundColor Cyan
+Write-Host "  -> Start backend:          botcrafter start" -ForegroundColor Cyan
+Write-Host "  -> View server info:       botcrafter info" -ForegroundColor Cyan
+Write-Host "  -> Update engine (No loss):botcrafter update" -ForegroundColor Cyan
+Write-Host "  -> Change server IP:       botcrafter set-ip [new_ip]" -ForegroundColor Cyan
+Write-Host "  -> Uninstall BotCrafter:   botcrafter uninstall" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "==============================================================================" -ForegroundColor Cyan
