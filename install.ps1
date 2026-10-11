@@ -39,17 +39,18 @@ Write-Host ""
 Write-Host "-------------------- [ 1. Server Configuration ] --------------------" -ForegroundColor Yellow
 
 # Port
-$InputPort = Read-Host "➜ Enter Backend Port [Default: 8000]"
-$Port = if ([string]::IsNullOrWhiteSpace($InputPort)) { "8000" } else { $InputPort }
+$InputPort = Read-Host "➜ Enter Backend Port [Default: 8001]"
+$Port = if ([string]::IsNullOrWhiteSpace($InputPort)) { "8001" } else { $InputPort }
 
 # Host IP / Domain
 $InputHost = Read-Host "➜ Enter Public IP or Domain [Default: $DetectedIP]"
 $ServerHost = if ([string]::IsNullOrWhiteSpace($InputHost)) { $DetectedIP } else { $InputHost }
 
 # Storage Path
-$DefaultDataDir = "C:\botcrafter\instances"
+$DefaultDataDir = "C:/botcrafter/instances"
 $InputDataDir = Read-Host "➜ Enter Bot Instances Storage Directory [Default: $DefaultDataDir]"
 $DataDir = if ([string]::IsNullOrWhiteSpace($InputDataDir)) { $DefaultDataDir } else { $InputDataDir }
+$DataDirClean = $DataDir.Replace('\', '/')
 
 Write-Host ""
 Write-Host "------------------ [ 2. Supabase Cloud Database ] -------------------" -ForegroundColor Yellow
@@ -86,6 +87,7 @@ Write-Host ""
 $InstallDir = "C:\botcrafter"
 $BinaryDest = "$InstallDir\botcrafter-server.exe"
 $ConfigFile = "$InstallDir\botcrafter.env"
+$EnvFile = "$InstallDir\.env"
 
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
@@ -130,7 +132,7 @@ if (Test-Path $LocalBinary) {
 }
 
 # 5. Write Environment Configuration File
-Write-Host "[*] Writing configuration to $ConfigFile..." -ForegroundColor Blue
+Write-Host "[*] Writing configuration to $ConfigFile and $EnvFile..." -ForegroundColor Blue
 $EnvContent = @"
 PROJECT_NAME="BotCrafter Engine"
 ENVIRONMENT="production"
@@ -138,7 +140,7 @@ HOST="0.0.0.0"
 PORT=$Port
 SERVER_HOST_IP="$ServerHost"
 SERVER_DOMAIN="$ServerHost"
-DATA_DIR="$DataDir"
+DATA_DIR="$DataDirClean"
 SUPABASE_URL="$SupabaseUrl"
 SUPABASE_ANON_KEY="$SupabaseAnonKey"
 SUPABASE_SERVICE_ROLE_KEY="$SupabaseServiceKey"
@@ -148,12 +150,13 @@ CORS_ORIGINS="*"
 "@
 
 [System.IO.File]::WriteAllText($ConfigFile, $EnvContent, [System.Text.Encoding]::UTF8)
+[System.IO.File]::WriteAllText($EnvFile, $EnvContent, [System.Text.Encoding]::UTF8)
 
 # 6. Configure Windows Defender Firewall (Open Port)
 Write-Host "[*] Configuring Windows Defender Firewall for TCP Port $Port..." -ForegroundColor Blue
 try {
     Remove-NetFirewallRule -DisplayName "BotCrafter Backend Port $Port" -ErrorAction SilentlyContinue
-    New-NetFirewallRule -DisplayName "BotCrafter Backend Port $Port" -Direction Inbound -LocalPort $Port -Protocol TCP -Action Allow -Force | Out-Null
+    New-NetFirewallRule -DisplayName "BotCrafter Backend Port $Port" -Direction Inbound -LocalPort $Port -Protocol TCP -Action Allow | Out-Null
     Write-Host "[+] Firewall rule configured successfully." -ForegroundColor Green
 } catch {
     Write-Host "[!] Warning while setting firewall rule: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -162,14 +165,11 @@ try {
 # 7. Create Windows 24/7 Autostart Service via Scheduled Task (Reboot & Crash Proof)
 Write-Host "[*] Configuring Windows 24/7 Autostart Service (Task Scheduler)..." -ForegroundColor Blue
 
-# Create startup launcher batch script to load environment variables and launch binary
+# Create startup launcher batch script to launch binary directly
 $LauncherBat = "$InstallDir\run-botcrafter.cmd"
 $BatContent = @"
 @echo off
 cd /d "$InstallDir"
-for /f "usebackq tokens=1,* delims==" %%A in ("$ConfigFile") do (
-    set "%%A=%%B"
-)
 "$BinaryDest"
 "@
 [System.IO.File]::WriteAllText($LauncherBat, $BatContent, [System.Text.Encoding]::ASCII)
