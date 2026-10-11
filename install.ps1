@@ -3,7 +3,12 @@
 # Supports: Windows Server 2016/2019/2022, Windows 10/11 Pro
 # ==============================================================================
 
-#Requires -RunAsAdministrator
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host "[!] Error: Administrator privileges required!" -ForegroundColor Red
+    Write-Host "    Please right-click PowerShell -> 'Run as Administrator', then run this command again." -ForegroundColor Yellow
+    return
+}
 
 $ErrorActionPreference = "Stop"
 
@@ -212,8 +217,8 @@ if "%1"=="info" (
     echo ==========================================
     echo BotCrafter Windows Service Information
     echo ==========================================
-    echo Server URL: http://$ServerHost:$Port
-    echo API Docs:   http://$ServerHost:$Port/docs
+    echo Server URL: http://${ServerHost}:${Port}
+    echo API Docs:   http://${ServerHost}:${Port}/docs
     echo Storage:    $DataDir
     echo Binary:     $BinaryDest
     echo Config:     $ConfigFile
@@ -236,8 +241,8 @@ Write-Host "====================================================================
 Write-Host "   🎉 CONGRATULATIONS! BOTCRAFTER IS INSTALLED ON WINDOWS & RUNNING 24/7! 🎉" -ForegroundColor Green
 Write-Host "==============================================================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  🌐 Live Server URL:       http://$ServerHost:$Port" -ForegroundColor Cyan
-Write-Host "  📚 Interactive API Docs:  http://$ServerHost:$Port/docs" -ForegroundColor Cyan
+Write-Host "  🌐 Live Server URL:       http://${ServerHost}:${Port}" -ForegroundColor Cyan
+Write-Host "  📚 Interactive API Docs:  http://${ServerHost}:${Port}/docs" -ForegroundColor Cyan
 Write-Host "  👤 Administrator Email:   $AdminEmail" -ForegroundColor Yellow
 Write-Host "  💾 Storage Path:          $DataDir" -ForegroundColor Yellow
 Write-Host "  🔄 Windows Autostart:     ENABLED (Starts automatically on VPS boot 24/7)" -ForegroundColor Green
